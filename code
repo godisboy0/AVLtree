@@ -198,6 +198,9 @@ node<T> *AVLtree<T>::delete_node_mt(int key, node<T> *ROOT) {
 			//这一步应当已经设置好height，这是下一个语句正确的基础
 			if (balance(ROOT->left, ROOT->right) == 2) {//从右子树删除了一个节点，因此要计算一下
 				/*if (key > ROOT->left->key)
+				//这个语句不能正确处理某些情况，因此修改为下面的语句
+				//具体地讲，就是该语句其实是种为真，又因为我们删除节点时是从右子树寻找一个最小值进行更换
+				//会导致无法处理当左子树高度大于右子树时删除根节点的情况。在这个语句中，此时仍会左左旋转，这就错了
 					ROOT = left_left_rotation(ROOT);
 				else
 					ROOT = left_right_rotation(ROOT);*/
