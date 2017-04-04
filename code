@@ -1,0 +1,338 @@
+//一棵插入和删除时自平衡的二叉树，插入时需要提供一个key值和一个data值，key值是一个有符号整型数，用来确定插入位置
+//data为一个自定义类型，一般就认为是卫星数据了。data类型需要重载等号运算符，大结构最好有移动构造函数
+//提供前序、中序、后序、层级遍历功能，相应函数返回一个vector<pair<int,T>>的结构，其中pair.first是key，pair.second是data  
+
+#include<iostream>
+#include<sstream>
+#include<stack>
+#include<queue>
+#include<vector>
+#include<utility>//用于pair和std::move函数
+#include<stdlib.h>//用于引入exit函数
+
+using std::cout;
+using std::cin;
+using std::endl;
+using std::istringstream;
+using std::vector;
+
+//顺便搞一个更加实用的吧，用key来排序，用data来储存卫星数据
+//刚开始，我想的是当插入时，实时进行运算，比如当向一个节点的子树插入一个数据，我们就把该节点的平衡因子进行修改。
+//如果此时平衡因子大于等于2或者小于等于-2，那么就进行旋转。
+//后来想想这样的实现是不对的，因为即使你向一个节点的子树插入新数据时，该节点的相应子树高度未必增加，这就出现了问题。
+//因此，实际上只好用在节点增加树的高度这个属性，当插入一个元素时，递归重新维护树的高度。再检测左子树和右子树之间的高度差。
+//如果等于2或者等于-2，那么就旋转之。
+
+template<typename T>
+class node {
+	template<typename T>
+		friend class AVLtree;//类模板的友元声明真是很奇葩啊
+	int key;
+	int height = 1;//以该节点为根节点的树的高度,如果左右节点均为null，则树高为1
+	T data;
+	node *left = nullptr;
+	node *right = nullptr;
+};
+
+template<typename T>
+class AVLtree {
+private:
+	node<T> *root = nullptr;
+	void error_mt(const char *info) const { cout << info << endl; exit(1); };
+	int getheight(const node<T> *pp) const { return pp ? pp->height : 0; };
+	int MAX(const int a, const int b) const { return a > b ? a : b; };
+	int balance(const node<T> *left, const node<T> *right) const {
+		return getheight(left) - getheight(right);
+	};
+	node<T> *left_left_rotation(node<T> *ROOT);
+	node<T> *left_right_rotation(node<T> *ROOT);
+	node<T> *right_right_rotation(node<T> *ROOT);
+	node<T> *right_left_rotation(node<T> *ROOT);
+	node<T> *insert_mt(const int key, const T & data, node<T>* next);
+	node<T>* findmin(node<T>* ROOT);
+	node<T>* delete_node_mt(int key, node<T>* ROOT);
+	void print_key_mt(node<T>* ROOT);
+public:
+	void insert(const int key, const T & data) {root = insert_mt(key, data, root);}
+	void delete_node(int key) {root = delete_node_mt(key, root);};
+	void print_key();//以中序遍历的方式打印key值，主要是测试用，用来测试是否是一棵搜索树
+	std::vector<std::pair<int, T>> level_reversal() noexcept;//层级遍历的非递归实现
+	std::vector<std::pair<int, T>> pre_reversal() noexcept;//前序遍历的非递归实现
+	std::vector<std::pair<int, T>> middle_reversal() noexcept;//中序遍历的非递归实现
+	std::vector<std::pair<int, T>> post_reversal() noexcept;//后续遍历的非递归实现
+	//目前这些遍历结构都存在一个问题，即如果data是一个大结构，将会多次（元素个数次）触发拷贝构造函数（不能使用移动构造函数）
+	//导致效率低下，而且返回的data因为是拷贝版本，实际上也不能修改
+	//可以考虑这样对遍历进行改造，遍历只输出key值，再提供一个get_data函数来返回data的引用
+	T &get_data(const int key);//这本来也是个必须的函数啊，不然搜索树是用来干嘛的……
+	bool empty()const { return root == nullptr; };
+	int get_height() const { return root?root->height:0; };
+	//根据深入理解计算机系统，这个语句可能会解引用空指针，但getheight函数也没出错，我们不妨认为这个语句并没有被优化
+	//其实这样是不对的，不应该假设计算机的行为。等回去再查查书吧。
+};
+
+
+template<typename T>
+node<T> * AVLtree<T>::left_left_rotation(node<T> *ROOT) {
+
+	node<T> *ret = ROOT->left;
+	ROOT->left = ret->right;
+	ret->right = ROOT;
+	ROOT->height = MAX(getheight(ROOT->left), getheight(ROOT->right)) + 1;
+	ret->height = MAX(getheight(ret->left), getheight(ret->right)) + 1;
+	//这两个height设置的顺序是不能更换的
+	return ret;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::left_right_rotation(node<T> *ROOT) {
+
+	node<T> *ret = ROOT->left->right;
+	node<T> *tmp = ROOT->left;
+	ROOT->left = ret->right;
+	tmp->right = ret->left;
+	ret->left = tmp;
+	ret->right = ROOT;
+	ROOT->height = MAX(getheight(ROOT->left), getheight(ROOT->right)) + 1;
+	tmp->height = MAX(getheight(tmp->left), getheight(tmp->right)) + 1;
+	ret->height = MAX(getheight(ret->left), getheight(ret->right)) + 1;
+	return ret;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::right_right_rotation(node<T> *ROOT) {
+	
+	node<T> *ret = ROOT->right;
+	ROOT->right = ret->left;
+	ret->left = ROOT;
+	ROOT->height = MAX(getheight(ROOT->left), getheight(ROOT->right)) + 1;
+	ret->height = MAX(getheight(ret->left), getheight(ret->right)) + 1;
+	return ret;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::right_left_rotation(node<T> *ROOT) {
+
+	node<T> *ret = ROOT->right->left;
+	node<T> *tmp = ROOT->right;
+	ROOT->right = ret->left;
+	tmp->left = ret->right;
+	ret->left = ROOT;
+	ret->right = tmp;
+	ROOT->height = MAX(getheight(ROOT->left), getheight(ROOT->right)) + 1;
+	tmp->height = MAX(getheight(tmp->left), getheight(tmp->right)) + 1;
+	ret->height = MAX(getheight(ret->left), getheight(ret->right)) + 1;
+	return ret;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::insert_mt(const int key,const T &data,node<T> *next) {//data用引用是怕数据量太大效率低
+	//递归的思路难点在于你需要确定递归的内循环结果是正确的，如果内循环结果是正确的，你就可以进行本次递归
+	//并期待本次递归的内循环仍然是对的，所以，检查最内层循环的正确性，并利用循环不变式来证明本次递归依然是正确的
+	//这是递归的一个很重要的思路，还需要锻炼啊。
+
+	if (!next) {
+		next = new node<T>;
+		next->data = data;//data之后再也不用了，可以用std::move强制触发移动构造函数
+		next->key = key;
+	}
+	else if (key < next->key){//插入左子树
+		next->left = insert_mt(key, data, next->left);
+		if (balance(next->left, next->right) == 2) {
+			if (key < next->left->key)//比左子树的key还小，也就是左左插入了，此时应当进行左左旋转
+				next = left_left_rotation(next);
+			else
+				next = left_right_rotation(next);
+		}
+	}
+	else if (key > next->key) {
+		next->right = insert_mt(key, data, next->right);
+		if (balance(next->left, next->right) == -2) {
+			if (key > next->right->key)
+				next = right_right_rotation(next);
+			else next = right_left_rotation(next);
+		}
+	}
+	else {//key值相等
+		error_mt("Same key is not allowed");
+	}
+	next->height = MAX(getheight(next->left), getheight(next->right)) + 1;
+	return next;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::findmin(node<T> *ROOT) {
+
+	while (ROOT->left)
+		ROOT = ROOT->left;
+	return ROOT;
+}
+
+template<typename T>
+node<T> *AVLtree<T>::delete_node_mt(int key, node<T> *ROOT) {
+
+	if (ROOT == nullptr)
+		return ROOT;
+	node<T> *temp = ROOT;
+	if (key < ROOT->key) {
+		ROOT->left = delete_node_mt(key, ROOT->left);
+		if (balance(ROOT->left, ROOT->right) == -2) {
+			if (key < ROOT->right->key)
+				ROOT = right_right_rotation(ROOT);
+			else ROOT = right_left_rotation(ROOT);
+		}
+	}
+	else if (key > ROOT->key) {
+		ROOT->right = delete_node_mt(key, ROOT->right);
+		if (balance(ROOT->left, ROOT->right) == 2) {
+			if (getheight(ROOT->left->left) < getheight(ROOT->left->right))
+				ROOT = left_right_rotation(ROOT);
+			else ROOT = left_left_rotation(ROOT);
+		}
+	}
+	else {
+		if (ROOT->left && ROOT->right) {//有两个子节点
+			temp = findmin(ROOT->right);
+			ROOT->data = temp->data;
+			ROOT->key = temp->key;
+			ROOT->right = delete_node_mt(ROOT->key, ROOT->right);
+			//这一步应当已经设置好height，这是下一个语句正确的基础
+			if (balance(ROOT->left, ROOT->right) == 2) {//从右子树删除了一个节点，因此要计算一下
+				/*if (key > ROOT->left->key)
+					ROOT = left_left_rotation(ROOT);
+				else
+					ROOT = left_right_rotation(ROOT);*/
+				if(getheight(ROOT->left->left) < getheight(ROOT->left->right))
+					ROOT = left_right_rotation(ROOT);
+				else ROOT = left_left_rotation(ROOT);
+			}
+		}
+		else {
+			temp = ROOT;
+			if (!ROOT->left)
+				ROOT = ROOT->right;
+			else if (!ROOT->right)
+				ROOT = ROOT->left;
+			delete temp;
+		}
+	}
+	if(ROOT)
+		ROOT->height = MAX(getheight(ROOT->left), getheight(ROOT->right)) + 1;
+	return ROOT;
+}
+
+template<typename T>
+void AVLtree<T>::print_key_mt(node<T> *ROOT) {
+
+	if (ROOT) {
+		print_key_mt(ROOT->left);
+		cout << ROOT->key << " ";
+		print_key_mt(ROOT->right);
+	}
+}
+
+template<typename T>
+inline void AVLtree<T>::print_key() {
+
+	cout << "root key is " << root->key << endl;
+	print_key_mt(root);
+	cout << endl;
+
+}
+
+template<typename T>
+std::vector<std::pair<int,T>> AVLtree<T>::level_reversal() noexcept {//我想应该把这个函数声明为不抛出异常
+
+	std::vector<std::pair<int, T>> vec_map_data;
+	std::queue<node<T> *> qt;
+	qt.push(root);
+	while (!qt.empty()) {
+		node<T> *tmp = qt.front();
+		qt.pop();
+		vec_map_data.push_back(std::make_pair(tmp->key,tmp->data));
+		//如果data是个大结构，这一步效率也很低，但是如果用move语义，就可能破坏原数据
+		//此外，返回的数据修改后不影响原始数据，换句话说，目前这个AVL树插入数据后不能修改
+		//主要是vector的成员不能是引用= =
+		//如果各种遍历只返回key值，就要快得多，然后设置一个get_data函数，返回data的引用，比较两全其美吧
+		if (tmp->left)
+			qt.push(tmp->left);
+		if (tmp->right)
+			qt.push(tmp->right);
+	}
+	return std::move(vec_map_data);
+	//在编写这段代码时，加深了对移动语义的理解。最初的函数是这样写的
+	//vector<pair<int,T>> &&level_reversal(),我以为这样会返回右值，但是发现vec_map_data竟然会被析构掉。
+	//后来发现其实返回右值引用的写法就是错误的，这样强制使编译器认为返回的是一个临时的、需要被析构的对象
+	//导致其在返回后就被析构，从而以该函数初始化的对象不能正确初始化。
+	//实际上，std::move并不发生任何移动，只是一个类型转化，将左值转化为右值，从而提醒编译器触发该对象的移动构造函数而已
+	//在C++11中，如果返回一个临时对象（即将死亡的对象），编译器会自动将其作为一个右值，触发移动构造函数，而非拷贝构造函数
+	//因此，这一句中的std::move()实际上是一个冗余的语句，但是也没有关系。
+	//在某些情况下，比如上面代码中的next->data = data语句中，此时默认调用的是data的拷贝构造函数
+	//如果改为next->data = std::move(data)，将会强制触发data的移动构造函数，如果没有移动构造函数，才触发拷贝构造函数
+	//在C++premiere这本书中，讲到这类移动语义的函数如果可以，最好设置为noexcept的，从而通知编译器产生优化代码
+}
+
+template<typename T>
+std::vector<std::pair<int, T>> AVLtree<T>::pre_reversal() noexcept {
+
+	std::vector<std::pair<int, T>> vec_map_data;
+	std::stack<node<T> *> qt;
+	node<T> *next = root;
+	while (next || !qt.empty()) {
+		while (next) {
+			vec_map_data.push_back(std::make_pair(next->key,next->data));
+			qt.push(next);
+			next = next->left;
+		}
+		if (!qt.empty()) {
+			next = (qt.top())->right;
+			qt.pop();
+		}
+	}
+	return std::move(vec_map_data);
+}
+
+template<typename T>
+std::vector<std::pair<int, T>> AVLtree<T>::middle_reversal() noexcept {
+
+	std::vector<std::pair<int, T>> vec_map_data;
+	std::stack<node<T> *> qt;
+	node<T> *next = root;
+	while (next || !qt.empty()) {
+		while (next) {
+			qt.push(next);
+			next = next->left;
+		}
+		vec_map_data.push_back(std::make_pair(qt.top()->key, qt.top()->data));
+		if (!qt.empty()) {
+			next = (qt.top())->right;
+			qt.pop();
+		}
+	}
+	return std::move(vec_map_data);
+
+}
+
+template<typename T>
+std::vector<std::pair<int, T>> AVLtree<T>::post_reversal() noexcept {
+
+	std::vector<std::pair<int, T>> vec_map_data;
+	std::stack<node<T> *> qt;
+	node<T> *next = root;
+	qt.push(next);
+	qt.push(next);
+	while (!qt.empty()) {
+		next = qt.top(); qt.pop();
+		if (!qt.empty() && next == qt.top()) {
+			if (next->right) {
+				qt.push(next->right); qt.push(next->right);
+			}
+			if (next->left) {
+				qt.push(next->left); qt.push(next->left);
+			}
+		}
+		else {//当前元素和栈顶元素不相等，说明已经弹出过一次了
+			vec_map_data.push_back(std::make_pair(next->key, next->data));
+		}
+	}
+	return std::move(vec_map_data);
+}
